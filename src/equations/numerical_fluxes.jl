@@ -72,21 +72,21 @@ end
 
 
 # Rotated surface flux computation (3D version)
-@inline function (flux_rotated::FluxRotated)(u_ll, u_rr, normal, equations::AbstractEquations{3})
+@inline function (flux_rotated::FluxRotated)(u_ll, u_rr, normal, tangent1, tangent2, equations::AbstractEquations{3})
   @unpack numerical_flux = flux_rotated
 
   norm_ = norm(normal)
   # Normalize the vector without using `normalize` since we need to multiply by the `norm_` later
   normal_normalized = normal / norm_
 
-  # Some vector that can't be identical to normal (unless normal == 0)
-  tangent1 = SVector(normal[2], normal[3], -normal[1])
-  # Orthogonal projection
-  tangent1 -= dot(normal_normalized, tangent1) * normal_normalized
-  tangent1 = normalize(tangent1)
+  # # Some vector that can't be identical to normal (unless normal == 0)
+  # tangent1 = SVector(normal[2], normal[3], -normal[1])
+  # # Orthogonal projection
+  # tangent1 -= dot(normal_normalized, tangent1) * normal_normalized
+  # tangent1 = normalize(tangent1)
 
-  # Third orthogonal vector
-  tangent2 = normalize(cross(normal, tangent1))
+  # # Third orthogonal vector
+  # tangent2 = normalize(cross(normal, tangent1))
 
   u_ll_rotated = rotate_to_x(u_ll, normal_normalized, tangent1, tangent2, equations)
   u_rr_rotated = rotate_to_x(u_rr, normal_normalized, tangent1, tangent2, equations)

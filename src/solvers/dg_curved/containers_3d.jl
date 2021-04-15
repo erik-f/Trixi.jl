@@ -1,7 +1,7 @@
 # Initialize data structures in element container
 function init_elements!(elements, mesh::CurvedMesh{3}, basis::LobattoLegendreBasis)
-  @unpack node_coordinates, left_neighbors, 
-          jacobian_matrix, contravariant_vectors, inverse_jacobian = elements
+  @unpack node_coordinates, left_neighbors, jacobian_matrix,
+          contravariant_vectors, interface_vectors, inverse_jacobian = elements
 
   linear_indices = LinearIndices(size(mesh))
 
@@ -15,12 +15,55 @@ function init_elements!(elements, mesh::CurvedMesh{3}, basis::LobattoLegendreBas
 
     calc_contravariant_vectors!(contravariant_vectors, element, jacobian_matrix, node_coordinates, basis)
 
+    calc_interface_vectors!(interface_vectors, element, contravariant_vectors, basis)
+
     calc_inverse_jacobian!(inverse_jacobian, element, jacobian_matrix, basis)
   end
 
   initialize_neighbor_connectivity!(left_neighbors, mesh, linear_indices)
 
   return nothing
+end
+
+function calc_interface_vectors!(interface_vectors, element, contravariant_vectors, basis)
+  
+  for i in eachnode(basis), j in eachnode(basis)
+    for direction in 1:6
+      index = div(direction-1,2)+1
+      if direction in (1, 3, 5)
+        node = 1
+      else
+        node = nnodes(basis)
+      end
+      if direction in (1, 2) # x-direction
+        normal = get_contravariant_vector(index, contravariant_vectors, node, i, j, element)
+      elseif direction in (3, 4) # y-direction
+        normal = get_contravariant_vector(index, contravariant_vectors, i, node, j, element)
+      else # z-direction
+        normal = get_contravariant_vector(index, contravariant_vectors, i, j, node, element)
+      end
+    
+      # Some vector that can't be identical to normal (unless normal == 0)
+      norm_ = norm(normal)
+      # Normalize the vector without using `normalize` since we need to multiply by the `norm_` later
+      normal_normalized = normal / norm_
+      tangent1 = SVector(normal[2], normal[3], -normal[1])
+      # Orthogonal projection
+      tangent1 -= dot(normal_normalized, tangent1) * normal_normalized
+      tangent1 = normalize(tangent1)
+      
+      # Third orthogonal vector
+      tangent2 = normalize(cross(normal, tangent1))
+    
+      for v in 1:3
+        interface_vectors[1, v, i, j, direction, element] = normal[v]
+        interface_vectors[2, v, i, j, direction, element] = tangent1[v]
+        interface_vectors[3, v, i, j, direction, element] = tangent2[v]
+      end
+    end
+  end
+
+  return interface_vectors
 end
 
 

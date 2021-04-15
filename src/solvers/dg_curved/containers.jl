@@ -9,6 +9,8 @@ struct ElementContainer{NDIMS, RealT<:Real, uEltype<:Real, NDIMSP1, NDIMSP2, NDI
   jacobian_matrix       ::Array{RealT, NDIMSP3}
   # Contravariant vectors, scaled by J, in Kopriva's blue book called Ja^i_n (i index, n dimension)
   contravariant_vectors ::Array{RealT, NDIMSP3}   # [index, dimension, node_i, node_j, node_k, element]
+  # save normal and tangent vectors
+  interface_vectors     ::Array{RealT, NDIMSP3}   # [index, dimension, i, j, direction, element]
   # 1/J where J is the Jacobian determinant (determinant of Jacobian matrix)
   inverse_jacobian      ::Array{RealT, NDIMSP1}   # [node_i, node_j, node_k, element]
   # Buffer for calculated surface flux
@@ -26,12 +28,13 @@ function init_elements(mesh::CurvedMesh{NDIMS, RealT},
   left_neighbors        = Array{Int, 2}(undef, NDIMS, nelements)
   jacobian_matrix       = Array{RealT, NDIMS+3}(undef, NDIMS, NDIMS, ntuple(_ -> nnodes(basis), NDIMS)..., nelements)
   contravariant_vectors = similar(jacobian_matrix)
+  interface_vectors     = Array{RealT, NDIMS+3}(undef, NDIMS, NDIMS, ntuple(_ -> nnodes(basis), NDIMS-1)..., NDIMS*2, nelements)
   inverse_jacobian      = Array{RealT, NDIMS+1}(undef, ntuple(_ -> nnodes(basis), NDIMS)..., nelements)
   surface_flux_values   = Array{uEltype, NDIMS+2}(undef, nvariables(equations), 
                                                   ntuple(_ -> nnodes(basis), NDIMS-1)..., NDIMS*2, nelements)
 
   elements = ElementContainer{NDIMS, RealT, uEltype, NDIMS+1, NDIMS+2, NDIMS+3}(
-      node_coordinates, left_neighbors, jacobian_matrix, contravariant_vectors,
+      node_coordinates, left_neighbors, jacobian_matrix, contravariant_vectors, interface_vectors,
       inverse_jacobian, surface_flux_values)
 
   init_elements!(elements, mesh, basis)
