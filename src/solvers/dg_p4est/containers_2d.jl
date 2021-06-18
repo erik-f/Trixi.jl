@@ -76,7 +76,7 @@ end
 
 
 @inline function init_interface_node_indices!(interfaces::InterfaceContainerP4est{2},
-                                              faces, orientation, interface_id)
+                                              faces, orientation, same_orientation, interface_id)
   # Iterate over primary and secondary element
   for side in 1:2
     # Align interface in positive coordinate direction of primary element.
@@ -131,7 +131,7 @@ end
 
 # faces[1] is expected to be the face of the small side.
 @inline function init_mortar_node_indices!(mortars::MortarContainerP4est{2},
-  faces, orientation, mortar_id)
+                                           faces, orientation, same_orientation, mortar_id)
   for side in 1:2
     # Align mortar in positive coordinate direction of small side.
     # For orientation == 1, the large side needs to be indexed backwards

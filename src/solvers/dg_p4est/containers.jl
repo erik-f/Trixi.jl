@@ -156,14 +156,14 @@ function init_interfaces(mesh::P4estMesh, equations, basis, elements)
   interfaces = InterfaceContainerP4est{NDIMS, uEltype, NDIMS+2}(u, element_ids, node_indices,
                                                                 _u, _element_ids, _node_indices)
 
-  init_interfaces!(interfaces, mesh)
+  init_interfaces!(interfaces, elements, mesh)
 
   return interfaces
 end
 
 
-function init_interfaces!(interfaces, mesh::P4estMesh)
-  init_surfaces!(interfaces, nothing, nothing, mesh)
+function init_interfaces!(interfaces, elements, mesh::P4estMesh)
+  init_surfaces!(interfaces, nothing, nothing, elements, mesh)
 
   return interfaces
 end
@@ -224,15 +224,15 @@ function init_boundaries(mesh::P4estMesh, equations, basis, elements)
                                                                node_indices, names, _u)
 
   if n_boundaries > 0
-    init_boundaries!(boundaries, mesh)
+    init_boundaries!(boundaries, elements, mesh)
   end
 
   return boundaries
 end
 
 
-function init_boundaries!(boundaries, mesh::P4estMesh)
-  init_surfaces!(nothing, nothing, boundaries, mesh)
+function init_boundaries!(boundaries, elements, mesh::P4estMesh)
+  init_surfaces!(nothing, nothing, boundaries, elements, mesh)
 
   return boundaries
 end
@@ -356,15 +356,15 @@ function init_mortars(mesh::P4estMesh, equations, basis, elements)
                                                                    _u, _element_ids, _node_indices)
 
   if n_mortars > 0
-    init_mortars!(mortars, mesh)
+    init_mortars!(mortars, elements, mesh)
   end
 
   return mortars
 end
 
 
-function init_mortars!(mortars, mesh::P4estMesh)
-  init_surfaces!(nothing, mortars, nothing, mesh)
+function init_mortars!(mortars, elements, mesh::P4estMesh)
+  init_surfaces!(nothing, mortars, nothing, elements, mesh)
 
   return mortars
 end
@@ -392,25 +392,26 @@ function reinitialize_containers!(mesh::P4estMesh, equations, dg::DGSEM, cache)
 
   # re-initialize containers together to reduce
   # the number of iterations over the mesh in p4est
-  init_surfaces!(interfaces, mortars, boundaries, mesh)
+  init_surfaces!(interfaces, mortars, boundaries, elements, mesh)
 end
 
 
 # A helper struct used in initialization methods below
-mutable struct InitSurfacesIterFaceUserData{Interfaces, Mortars, Boundaries, Mesh}
+mutable struct InitSurfacesIterFaceUserData{Interfaces, Mortars, Boundaries, Elements, Mesh}
   interfaces  ::Interfaces
   interface_id::Int
   mortars     ::Mortars
   mortar_id   ::Int
   boundaries  ::Boundaries
   boundary_id ::Int
+  elements    ::Elements
   mesh        ::Mesh
 end
 
-function InitSurfacesIterFaceUserData(interfaces, mortars, boundaries, mesh)
+function InitSurfacesIterFaceUserData(interfaces, mortars, boundaries, elements, mesh)
   return InitSurfacesIterFaceUserData{
-    typeof(interfaces), typeof(mortars), typeof(boundaries), typeof(mesh)}(
-      interfaces, 1, mortars, 1, boundaries, 1, mesh)
+    typeof(interfaces), typeof(mortars), typeof(boundaries), typeof(elements), typeof(mesh)}(
+      interfaces, 1, mortars, 1, boundaries, 1, elements, mesh)
 end
 
 function init_surfaces_iter_face(info, user_data)
@@ -455,11 +456,11 @@ function init_surfaces_iter_face_inner(info, user_data)
   return nothing
 end
 
-function init_surfaces!(interfaces, mortars, boundaries, mesh::P4estMesh)
+function init_surfaces!(interfaces, mortars, boundaries, elements, mesh::P4estMesh)
   # Let p4est iterate over all interfaces and call init_surfaces_iter_face
   iter_face_c = cfunction(init_surfaces_iter_face, Val(ndims(mesh)))
   user_data = InitSurfacesIterFaceUserData(
-    interfaces, mortars, boundaries, mesh)
+    interfaces, mortars, boundaries, elements, mesh)
 
   iterate_p4est(mesh.p4est, user_data; iter_face_c=iter_face_c)
 
@@ -469,7 +470,7 @@ end
 
 # Initialization of interfaces after the function barrier
 function init_interfaces_iter_face_inner(info, sides, user_data)
-  @unpack interfaces, interface_id, mesh = user_data
+  @unpack interfaces, interface_id, elements, mesh = user_data
   user_data.interface_id += 1
 
   # Get Tuple of local trees, one-based indexing
@@ -491,8 +492,12 @@ function init_interfaces_iter_face_inner(info, sides, user_data)
   # Face at which the interface lies
   faces = (sides[1].face, sides[2].face)
 
+  indices = ntuple(_ -> 1, ndims(mesh))
+  same_orientation = (sign(elements.inverse_jacobian[indices..., quad_ids[1] + 1])
+                      == sign(elements.inverse_jacobian[indices..., quad_ids[2] + 1]))
+
   # Save interfaces.node_indices dimension specific in containers_[23]d.jl
-  init_interface_node_indices!(interfaces, faces, info.orientation, interface_id)
+  init_interface_node_indices!(interfaces, faces, info.orientation, same_orientation, interface_id)
 
   return nothing
 end
@@ -536,7 +541,7 @@ end
 
 # Initialization of mortars after the function barrier
 function init_mortars_iter_face_inner(info, sides, user_data)
-  @unpack mortars, mortar_id, mesh = user_data
+  @unpack mortars, mortar_id, elements, mesh = user_data
   user_data.mortar_id += 1
 
   # Get Tuple of local trees, one-based indexing
@@ -577,7 +582,11 @@ function init_mortars_iter_face_inner(info, sides, user_data)
   # Last entry is the large element
   mortars.element_ids[end, mortar_id] = large_quad_id + 1
 
-  init_mortar_node_indices!(mortars, faces, info.orientation, mortar_id)
+  indices = ntuple(_ -> 1, ndims(mesh))
+  same_orientation = (sign(elements.inverse_jacobian[indices..., small_quad_ids[1] + 1])
+                      == sign(elements.inverse_jacobian[indices..., large_quad_id + 1]))
+
+  init_mortar_node_indices!(mortars, faces, info.orientation, same_orientation, mortar_id)
 
   return nothing
 end

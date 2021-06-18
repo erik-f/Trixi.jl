@@ -69,7 +69,7 @@ end
 
 
 @inline function init_interface_node_indices!(interfaces::InterfaceContainerP4est{3},
-                                              faces, orientation, interface_id)
+                                              faces, orientation, same_orientation, interface_id)
   # Iterate over primary and secondary element
   for side in 1:2
     # Align interface at the primary element (primary element has surface indices (:i, :j)).
@@ -78,7 +78,8 @@ end
       surface_index1 = :i
       surface_index2 = :j
     else
-      surface_index1, surface_index2 = p4est_orientation_to_indices(faces[2], faces[1], orientation)
+      surface_index1, surface_index2 = p4est_orientation_to_indices(faces[2], faces[1],
+                                                                    orientation, same_orientation)
     end
 
     if faces[side] == 0
@@ -134,7 +135,7 @@ end
 
 # faces[1] is expected to be the face of the small side.
 @inline function init_mortar_node_indices!(mortars::MortarContainerP4est{3},
-                                           faces, orientation, mortar_id)
+                                           faces, orientation, same_orientation, mortar_id)
   for side in 1:2
     # Align mortar at small side.
     # The large side needs to be indexed differently.
@@ -142,7 +143,8 @@ end
       surface_index1 = :i
       surface_index2 = :j
     else
-      surface_index1, surface_index2 = p4est_orientation_to_indices(faces[2], faces[1], orientation)
+      surface_index1, surface_index2 = p4est_orientation_to_indices(faces[2], faces[1],
+                                                                    orientation, same_orientation)
     end
 
     if faces[side] == 0
@@ -173,7 +175,7 @@ end
 # Convert p4est orientation code to node indices.
 # Return node indices that index "my side" wrt "other side",
 # i.e., i and j are indices of other side.
-function p4est_orientation_to_indices(my_face, other_face, orientation_code)
+function p4est_orientation_to_indices(my_face, other_face, orientation_code, same_orientation)
   # my_face and other_face are the face directions (zero-based)
   # of "my side" and "other side" respectively.
   # Face corner 0 of the face with the lower face direction connects to a corner of the other face.
@@ -185,9 +187,10 @@ function p4est_orientation_to_indices(my_face, other_face, orientation_code)
   my_right_handed = my_face in (1, 2, 5)
   other_right_handed = other_face in (1, 2, 5)
 
-  # If both or none are right-handed when looked at from the outside, they will have different
-  # orientations when looked at from the same side of the interface.
-  flipped = my_right_handed == other_right_handed
+  # If both or none faces are right-handed when looked at from the outside, they will have different
+  # orientations when looked at from the same side of the interface, provided that the volumes
+  # are both righ-handed or not right-handed. With different volume orientations, negate this variable.
+  flipped = (my_right_handed == other_right_handed) == same_orientation
 
   # In the folowing illustrations, p4est's face corner numbering is shown.
   # ξ and η are the local coordinates of the respective face.
