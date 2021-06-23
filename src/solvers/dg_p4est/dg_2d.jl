@@ -1,3 +1,25 @@
+# This method is called when a SemidiscretizationHyperbolic is constructed.
+# It constructs the basic `cache` used throughout the simulation to compute
+# the RHS etc.
+function create_cache(mesh::P4estMesh{2}, equations::AbstractEquations, dg::DG, ::Any, ::Type{uEltype}) where {uEltype<:Real}
+  # Make sure to balance the p4est before creating any containers
+  # in case someone has tampered with the p4est after creating the mesh
+  balance!(mesh)
+
+  elements   = init_elements(mesh, equations, dg.basis, uEltype, nothing)
+  interfaces = init_interfaces(mesh, equations, dg.basis, elements)
+  boundaries = init_boundaries(mesh, equations, dg.basis, elements)
+  mortars    = init_mortars(mesh, equations, dg.basis, elements)
+
+  cache = (; elements, interfaces, boundaries, mortars)
+
+  # Add specialized parts of the cache required to compute the volume integral etc.
+  cache = (;cache..., create_cache(mesh, equations, dg.mortar, uEltype)...)
+
+  return cache
+end
+
+
 # The methods below are specialized on the mortar type
 # and called from the basic `create_cache` method at the top.
 function create_cache(mesh::P4estMesh{2}, equations, mortar_l2::LobattoLegendreMortarL2, uEltype)

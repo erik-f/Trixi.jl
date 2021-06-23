@@ -1,5 +1,5 @@
 # Initialize data structures in element container
-function init_elements!(elements, mesh::P4estMesh{2}, basis::LobattoLegendreBasis)
+function init_elements!(elements, mesh::P4estMesh{2}, basis::LobattoLegendreBasis, _)
   @unpack node_coordinates, jacobian_matrix,
           contravariant_vectors, inverse_jacobian = elements
 

@@ -1,20 +1,76 @@
+# Note: This is an experimental feature and may be changed in future releases without notice.
+mutable struct P4estTreeContainer{RealT<:Real} <: AbstractContainer
+  # Same arrays as in P4estElementContainer, but on trees instead of elements.
+  # By https://doi.org/10.1007/s10915-018-00897-9, these need to be interpolated onto the elements
+  # to ensure FSP on non-conforming meshes in 3D.
+  node_coordinates     ::Array{RealT, 5}
+  jacobian_matrix      ::Array{RealT, 6}
+  contravariant_vectors::Array{RealT, 6}
+  inverse_jacobian     ::Array{RealT, 4}
+end
+
+
+# Create tree container and initialize tree data
+function init_trees(mesh::P4estMesh{3}, basis)
+  RealT = real(mesh)
+  n_trees = ntrees(mesh)
+
+  node_coordinates      = Array{RealT, 5}(undef, 3, nnodes(basis), nnodes(basis), nnodes(basis), n_trees)
+  jacobian_matrix       = Array{RealT, 6}(undef, 3, 3, nnodes(basis), nnodes(basis), nnodes(basis), n_trees)
+  contravariant_vectors = similar(jacobian_matrix)
+  inverse_jacobian      = Array{RealT, 4}(undef, nnodes(basis), nnodes(basis), nnodes(basis), n_trees)
+
+  tree_container = P4estTreeContainer{RealT}(
+    node_coordinates, jacobian_matrix, contravariant_vectors, inverse_jacobian)
+
+  interpolate_tree_node_coordinates!(node_coordinates, mesh, basis)
+
+  for tree in 1:n_trees
+    calc_jacobian_matrix!(jacobian_matrix, tree, node_coordinates, basis)
+
+    calc_contravariant_vectors!(contravariant_vectors, tree, jacobian_matrix,
+                                node_coordinates, basis)
+
+    calc_inverse_jacobian!(inverse_jacobian, tree, jacobian_matrix, basis)
+  end
+
+  return tree_container
+end
+
+
+function interpolate_tree_node_coordinates!(node_coordinates, mesh, basis)
+  matrix = polynomial_interpolation_matrix(mesh.nodes, basis.nodes)
+
+  for tree in 1:ntrees(mesh)
+    multiply_dimensionwise!(
+      view(node_coordinates, :, :, :, :, tree),
+      matrix, matrix, matrix,
+      view(mesh.tree_node_coordinates, :, :, :, :, tree)
+    )
+  end
+
+  return node_coordinates
+end
+
+
 # Initialize data structures in element container
-function init_elements!(elements, mesh::P4estMesh{3}, basis::LobattoLegendreBasis)
+function init_elements!(elements,
+                        mesh::P4estMesh{3},
+                        basis::LobattoLegendreBasis,
+                        trees::P4estTreeContainer)
   @unpack node_coordinates, jacobian_matrix,
           contravariant_vectors, inverse_jacobian = elements
 
   calc_node_coordinates!(node_coordinates, mesh, basis.nodes)
 
-  for element in 1:ncells(mesh)
-    calc_jacobian_matrix!(jacobian_matrix, element, node_coordinates, basis)
+  interpolate_trees_to_elements!(jacobian_matrix, contravariant_vectors, inverse_jacobian,
+                                 mesh, basis, trees)
 
-    calc_contravariant_vectors!(contravariant_vectors, element, jacobian_matrix,
-                                node_coordinates, basis)
+  return elements
+end
 
-    calc_inverse_jacobian!(inverse_jacobian, element, jacobian_matrix, basis)
-  end
-
-  return nothing
+function init_elements!(elements, mesh::P4estMesh{3}, basis, cache)
+  init_elements!(elements, mesh, basis, cache.trees)
 end
 
 
@@ -66,6 +122,83 @@ function calc_node_coordinates!(node_coordinates,
   end
 
   return node_coordinates
+end
+
+
+# Interpolate tree_node_coordinates to each quadrant
+function interpolate_trees_to_elements!(jacobian_matrix, contravariant_vectors, inverse_jacobian,
+                                        mesh::P4estMesh{3},
+                                        basis::LobattoLegendreBasis,
+                                        tree_container)
+  # Macros from p4est
+  p4est_root_len = 1 << P4EST_MAXLEVEL
+  p4est_quadrant_len(l) = 1 << (P4EST_MAXLEVEL - l)
+
+  trees = unsafe_wrap_sc(p8est_tree_t, mesh.p4est.trees)
+
+  for tree in eachindex(trees)
+    offset = trees[tree].quadrants_offset
+    quadrants = unsafe_wrap_sc(p8est_quadrant_t, trees[tree].quadrants)
+
+    for i in eachindex(quadrants)
+      element = offset + i
+      quad = quadrants[i]
+
+      quad_length = p4est_quadrant_len(quad.level) / p4est_root_len
+
+      nodes_out_x = 2 * (quad_length * 1/2 * (basis.nodes .+ 1) .+ quad.x / p4est_root_len) .- 1
+      nodes_out_y = 2 * (quad_length * 1/2 * (basis.nodes .+ 1) .+ quad.y / p4est_root_len) .- 1
+      nodes_out_z = 2 * (quad_length * 1/2 * (basis.nodes .+ 1) .+ quad.z / p4est_root_len) .- 1
+
+      matrix1 = polynomial_interpolation_matrix(mesh.nodes, nodes_out_x)
+      matrix2 = polynomial_interpolation_matrix(mesh.nodes, nodes_out_y)
+      matrix3 = polynomial_interpolation_matrix(mesh.nodes, nodes_out_z)
+
+      # Interpolate jacobian_matrix
+      for dim in 1:3
+        multiply_dimensionwise!(
+          view(jacobian_matrix, dim, :, :, :, :, element),
+          matrix1, matrix2, matrix3,
+          view(tree_container.jacobian_matrix, dim, :, :, :, :, tree)
+        )
+      end
+
+      # Correction factor
+      jacobian_matrix[.., element] ./= 2^quad.level
+
+      # Interpolate contravariant_vectors
+      for dim in 1:3
+        multiply_dimensionwise!(
+          view(contravariant_vectors, dim, :, :, :, :, element),
+          matrix1, matrix2, matrix3,
+          view(tree_container.contravariant_vectors, dim, :, :, :, :, tree)
+        )
+      end
+
+      # Correction factor
+      contravariant_vectors[.., element] ./= 4^quad.level
+
+      # Reshape arrays to allow usage of multiply_dimensionwise!
+      inverse_jacobian_ = unsafe_wrap(Array, pointer(inverse_jacobian),
+        (1, nnodes(basis), nnodes(basis), nnodes(basis), ncells(mesh)))
+
+      n_nodes_mesh = length(mesh.nodes)
+      tree_inverse_jacobian_ = unsafe_wrap(Array, pointer(tree_container.inverse_jacobian),
+        (1, n_nodes_mesh, n_nodes_mesh, n_nodes_mesh, ntrees(mesh)))
+
+      # Interpolate inverse_jacobian
+      multiply_dimensionwise!(
+        view(inverse_jacobian_, :, :, :, :, element),
+        matrix1, matrix2, matrix3,
+        view(tree_inverse_jacobian_, :, :, :, :, tree)
+      )
+
+      # Correction factor
+      inverse_jacobian_[.., element] .*= 8^quad.level
+    end
+  end
+
+  return jacobian_matrix
 end
 
 

@@ -63,8 +63,9 @@ end
 
 
 # Create element container and initialize element data
-function init_elements(mesh::P4estMesh{NDIMS, RealT}, equations,
-                       basis, ::Type{uEltype}) where {NDIMS, RealT<:Real, uEltype<:Real}
+function init_elements(mesh::P4estMesh, equations, basis, ::Type{uEltype}, trees) where {uEltype<:Real}
+  NDIMS = ndims(mesh)
+  RealT = real(mesh)
   nelements = ncells(mesh)
 
   _node_coordinates = Vector{RealT}(undef, NDIMS * nnodes(basis)^NDIMS * nelements)
@@ -94,7 +95,8 @@ function init_elements(mesh::P4estMesh{NDIMS, RealT}, equations,
     _node_coordinates, _jacobian_matrix, _contravariant_vectors,
     _inverse_jacobian, _surface_flux_values)
 
-  init_elements!(elements, mesh, basis)
+  init_elements!(elements, mesh, basis, trees)
+
   return elements
 end
 
@@ -374,7 +376,7 @@ function reinitialize_containers!(mesh::P4estMesh, equations, dg::DGSEM, cache)
   # Re-initialize elements container
   @unpack elements = cache
   resize!(elements, ncells(mesh))
-  init_elements!(elements, mesh, dg.basis)
+  init_elements!(elements, mesh, dg.basis, cache)
 
   required = count_required_surfaces(mesh)
 
