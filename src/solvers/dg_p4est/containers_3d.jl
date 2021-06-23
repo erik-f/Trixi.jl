@@ -125,7 +125,8 @@ function calc_node_coordinates!(node_coordinates,
 end
 
 
-# Interpolate tree_node_coordinates to each quadrant
+# Interpolate tree data to each quadrant to ensure FSP on non-conforming meshes.
+# See https://doi.org/10.1007/s10915-018-00897-9.
 function interpolate_trees_to_elements!(jacobian_matrix, contravariant_vectors, inverse_jacobian,
                                         mesh::P4estMesh{3},
                                         basis::LobattoLegendreBasis,
