@@ -47,22 +47,21 @@ mesh = P4estMesh{3}(mesh_file, polydeg=3,
                     mapping=mapping,
                     initial_refinement_level=1)
 
-# TODO P4EST FSP
-# # Refine bottom left quadrant of each tree to level 2
-# function refine_fn(p8est, which_tree, quadrant)
-#   if quadrant.x == 0 && quadrant.y == 0 && quadrant.z == 0 && quadrant.level < 2 && convert(Int, which_tree) == 0
-#     # return true (refine)
-#     return Cint(1)
-#   else
-#     # return false (don't refine)
-#     return Cint(0)
-#   end
-# end
+# Refine bottom left quadrant of each tree to level 2
+function refine_fn(p8est, which_tree, quadrant)
+  if quadrant.x == 0 && quadrant.y == 0 && quadrant.z == 0 && quadrant.level < 2
+    # return true (refine)
+    return Cint(1)
+  else
+    # return false (don't refine)
+    return Cint(0)
+  end
+end
 
-# Refine recursively until each bottom left quadrant of a tree has level 2
-# The mesh will be rebalanced before the simulation starts
-# refine_fn_c = @cfunction(refine_fn, Cint, (Ptr{Trixi.p8est_t}, Ptr{Trixi.p4est_topidx_t}, Ptr{Trixi.p8est_quadrant_t}))
-# Trixi.refine_p4est!(mesh.p4est, true, refine_fn_c, C_NULL)
+# Refine recursively until each bottom left quadrant of a tree has level 2.
+# The mesh will be rebalanced before the simulation starts.
+refine_fn_c = @cfunction(refine_fn, Cint, (Ptr{Trixi.p8est_t}, Ptr{Trixi.p4est_topidx_t}, Ptr{Trixi.p8est_quadrant_t}))
+Trixi.refine_p4est!(mesh.p4est, true, refine_fn_c, C_NULL)
 
 semi = SemidiscretizationHyperbolic(mesh, equations, initial_condition, solver, boundary_conditions=boundary_conditions)
 

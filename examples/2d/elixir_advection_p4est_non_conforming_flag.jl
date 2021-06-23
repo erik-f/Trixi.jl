@@ -37,8 +37,8 @@ function refine_fn(p4est, which_tree, quadrant)
   end
 end
 
-# Refine recursively until each bottom left quadrant of a tree has level 4
-# The mesh will be rebalanced before the simulation starts
+# Refine recursively until each bottom left quadrant of a tree has level 4.
+# The mesh will be rebalanced before the simulation starts.
 refine_fn_c = @cfunction(refine_fn, Cint, (Ptr{Trixi.p4est_t}, Ptr{Trixi.p4est_topidx_t}, Ptr{Trixi.p4est_quadrant_t}))
 Trixi.refine_p4est!(mesh.p4est, true, refine_fn_c, C_NULL)
 

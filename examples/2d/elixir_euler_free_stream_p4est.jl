@@ -38,6 +38,22 @@ isfile(mesh_file) || download("https://gist.githubusercontent.com/efaulhaber/a07
 # Map the unstructured mesh with the mapping above
 mesh = P4estMesh{2}(mesh_file, polydeg=3, mapping=mapping, initial_refinement_level=1)
 
+# Refine bottom left quadrant of each tree to level 2
+function refine_fn(p4est, which_tree, quadrant)
+  if quadrant.x == 0 && quadrant.y == 0 && quadrant.level < 2
+    # return true (refine)
+    return Cint(1)
+  else
+    # return false (don't refine)
+    return Cint(0)
+  end
+end
+
+# Refine recursively until each bottom left quadrant of a tree has level 2.
+# The mesh will be rebalanced before the simulation starts.
+refine_fn_c = @cfunction(refine_fn, Cint, (Ptr{Trixi.p4est_t}, Ptr{Trixi.p4est_topidx_t}, Ptr{Trixi.p4est_quadrant_t}))
+Trixi.refine_p4est!(mesh.p4est, true, refine_fn_c, C_NULL)
+
 semi = SemidiscretizationHyperbolic(mesh, equations, initial_condition, solver,
                                     boundary_conditions=Dict(
                                       :all => BoundaryConditionDirichlet(initial_condition)
